@@ -1,0 +1,29 @@
+# Mandera Batch Analytics Pipeline — Dependencies
+
+# Data generation
+faker==24.11.0
+
+# MongoDB
+pymongo==4.7.3
+dnspython==2.6.1
+
+# PostgreSQL
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.30
+
+# MinIO / Object Storage
+minio==7.2.7
+
+# Data processing
+pandas==2.2.2
+pyarrow==16.1.0
+
+# Airflow (install separately — see note below)
+# apache-airflow==2.9.2
+
+# Environment management
+python-dotenv==1.0.1
+
+# Utilities
+requests==2.32.3
+python-dateutil==2.9.0
