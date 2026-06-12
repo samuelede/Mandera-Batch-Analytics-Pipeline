@@ -13,7 +13,7 @@ A production-style batch analytics pipeline simulating how operational transacti
 ---
 
 ## Architecture Overview
-
+ 
 ```
 GitHub Actions (Scheduled)
         │
@@ -29,11 +29,11 @@ Python + Faker ──► MongoDB Atlas (Operational Source)
                               PostgreSQL (staging schema)
                               transformed + validated
 ```
-
+ 
 ---
-
+ 
 ## Technology Stack
-
+ 
 | Layer | Tool |
 |---|---|
 | Data Generation | Python, Faker |
@@ -43,11 +43,11 @@ Python + Faker ──► MongoDB Atlas (Operational Source)
 | Warehouse | PostgreSQL |
 | Transformation | Pandas |
 | Orchestration | Apache Airflow |
-
+ 
 ---
-
+ 
 ## Project Structure
-
+ 
 ```
 mandera_pipeline/
 ├── generator/
@@ -84,73 +84,90 @@ mandera_pipeline/
 ├── requirements.txt
 └── README.md
 ```
-
+ 
 ---
-
+ 
 ## Quick Start
-
+ 
 ### 1. Clone the Repository
-
+ 
 ```bash
 git clone https://github.com/your-username/mandera-batch-analytics-pipeline.git
 cd mandera-batch-analytics-pipeline
 ```
-
+ 
 ### 2. Create Virtual Environment
-
+ 
 ```bash
 python -m venv venv
-
+ 
 # Windows
 venv\Scripts\activate
-
+ 
 # macOS / Linux
 source venv/bin/activate
 ```
-
+ 
 ### 3. Install Dependencies
-
+ 
 ```bash
 pip install -r requirements.txt
 ```
-
+ 
 ### 4. Configure Environment Variables
-
+ 
 ```bash
 cp .env.example .env
 # Edit .env with your credentials
 ```
-
-### 5. Set Up PostgreSQL
-
+ 
+### 5. Set Up MongoDB Atlas
+ 
+1. Go to [cloud.mongodb.com](https://cloud.mongodb.com) and sign in or create a free account.
+2. Create a new project, then click **Build a Database** and select the **M0 Free** tier.
+3. Choose a cloud provider and region closest to you, then click **Create**.
+4. Under **Security → Database Access**, create a database user with a username and password — save these for your `.env`.
+5. Under **Security → Network Access**, click **Add IP Address** → **Allow Access from Anywhere** (`0.0.0.0/0`) for local development.
+6. Once the cluster is provisioned, click **Connect** → **Drivers**, select **Python**, and copy the connection string. It will look like:
+```
+mongodb+srv://<username>:<password>@<cluster>.mongodb.net/?retryWrites=true&w=majority&appName=<AppName>
+```
+7. Paste it into your `.env` as `MONGO_URI`, replacing `<username>` and `<password>` with your database user credentials.
+8. Set `MONGO_DB` to the database name the pipeline will use — this does not need to exist in advance. MongoDB Atlas creates it automatically on first write. For this project use:
+```
+MONGO_DB=mandera_db
+```
+9. The generator will create three collections automatically on first run: `raw_customers`, `raw_products`, and `raw_orders`.
+### 6. Set Up PostgreSQL
+ 
 ```bash
 psql -U postgres -c "CREATE DATABASE mandera_db;"
 psql -U postgres -d mandera_db -f sql/create_raw_tables.sql
 psql -U postgres -d mandera_db -f sql/create_staging_tables.sql
 psql -U postgres -d mandera_db -f sql/monitoring_tables.sql
 ```
-
-### 6. Start MinIO (Docker)
-
+ 
+### 7. Start MinIO (Docker)
+ 
 ```bash
 docker run -d \
   --name mandera-minio \
   -p 9000:9000 -p 9001:9001 \
   -e MINIO_ROOT_USER=minioadmin \
-  -e MINIO_ROOT_PASSWORD=minioadmin \
+  -e MINIO_ROOT_PASSWORD=minioadmin123 \
   -v minio_data:/data \
   quay.io/minio/minio server /data --console-address ":9001"
 ```
-
+ 
 Access MinIO Console: http://localhost:9001
-
-### 7. Set Up Apache Airflow
-
+ 
+### 8. Set Up Apache Airflow
+ 
 ```bash
 export AIRFLOW_HOME=$(pwd)/airflow
-
+ 
 airflow db init
-
+ 
 airflow users create \
   --username admin \
   --password admin \
@@ -158,27 +175,27 @@ airflow users create \
   --lastname Admin \
   --role Admin \
   --email admin@mandera.com
-
+ 
 # Copy DAG
 cp airflow/dags/mandera_pipeline_dag.py $AIRFLOW_HOME/dags/
-
+ 
 # Start services
 airflow webserver --port 8080 &
 airflow scheduler &
 ```
-
+ 
 Access Airflow UI: http://localhost:8080
-
-### 8. Run Data Generator Manually
-
+ 
+### 9. Run Data Generator Manually
+ 
 ```bash
 python generator/data_generator.py
 ```
-
+ 
 ---
-
+ 
 ## Pipeline Stages
-
+ 
 | Stage | Script | Description |
 |---|---|---|
 | Generate | `generator/data_generator.py` | Produce synthetic records with batch ID |
@@ -188,21 +205,21 @@ python generator/data_generator.py
 | Validate | `validation/validate_batch_counts.py` | Row count and variance monitoring |
 | Transform | `transformation/transform_*.py` | Produce staging-ready tables |
 | Truncate | `maintenance/truncate_raw_tables.py` | Clear raw tables after staging load |
-
+ 
 ---
-
+ 
 ## Environment Variables
-
+ 
 See `.env.example` for all required variables.
-
+ 
 ---
-
+ 
 ## GitHub Actions
-
+ 
 The workflow `.github/workflows/generate_data.yml` runs the data generator on a cron schedule, pushing new batches to MongoDB Atlas automatically.
-
+ 
 ---
-
+ 
 ## License
-
+ 
 MIT
