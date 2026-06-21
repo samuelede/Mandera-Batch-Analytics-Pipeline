@@ -135,7 +135,7 @@ mongodb+srv://<username>:<password>@<cluster>.mongodb.net/?retryWrites=true&w=ma
 7. Paste it into your `.env` as `MONGO_URI`, replacing `<username>` and `<password>` with your database user credentials.
 8. Set `MONGO_DB` to the database name the pipeline will use — this does not need to exist in advance. MongoDB Atlas creates it automatically on first write. For this project use:
 ```
-MONGO_DB=mandera_db
+MONGO_DB=mandera-db
 ```
 9. The generator will create three collections automatically on first run: `raw_customers`, `raw_products`, and `raw_orders`.
 ### 6. Set Up PostgreSQL

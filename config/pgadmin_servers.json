@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Begine Fusion Warehouse",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "begine_fusion_warehouse",
+      "Username": "pipeline",
+      "PassFile": "/pgpass",
+      "SSLMode": "prefer"
+    }
+  }
+}

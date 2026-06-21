@@ -25,6 +25,7 @@ from pymongo.errors import BulkWriteError
 from faker_customers import generate_customers
 from faker_products import generate_products
 from faker_orders import generate_orders
+from config.settings import validate_mongo_config
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -86,6 +87,8 @@ def insert_records(collection, records: list[dict], label: str) -> int:
 # Main
 # ---------------------------------------------------------------------------
 def run_generator() -> dict:
+    validate_mongo_config();
+    
     batch_id   = str(uuid.uuid4())
     batch_time = datetime.now(timezone.utc).isoformat()
 
