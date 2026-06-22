@@ -1,0 +1,38 @@
+name: Generate Synthetic Data → MongoDB Atlas
+
+on:
+  pull_request:
+
+  schedule:
+    # 8:00 AM WAT (UTC+1) = 07:00 UTC
+    - cron: "0 7 * * *"
+    # 4:00 PM WAT (UTC+1) = 15:00 UTC
+    - cron: "0 15 * * *"
+
+  # Allow manual trigger for testing or on-demand data generation
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate synthetic data → MongoDB Atlas
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          MONGO_DB: ${{ secrets.MONGO_DB }}
+        run: python generator/data_generator.py
+
+      - name: Log summary
+        run: echo "✓ Data generated at $(date -u '+%Y-%m-%d %H:%M UTC')"
