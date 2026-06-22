@@ -9,6 +9,15 @@ hardcoded here. If you rename a raw table, update RAW_TABLES (and
 the matching SQL in sql/create_raw_tables.sql) and this script
 picks up the change automatically.
 
+IDEMPOTENCY: before inserting, any existing rows for the same
+batch_id are deleted from the target table. This makes re-running
+extraction for the same batch safe (e.g. after an Airflow task
+retry) instead of raising a primary key violation on
+(customer_id, batch_id) / (product_id, batch_id) / (order_id, batch_id).
+A delete-then-insert was chosen over ON CONFLICT DO NOTHING so that
+a re-run is visible in loaded_at timestamps, rather than silently
+appearing identical to a first run.
+
 Usage:
     python extraction/extract_mongo_to_postgres.py --batch-id <batch_id>
     python extraction/extract_mongo_to_postgres.py   # uses latest batch
@@ -22,7 +31,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 from pymongo import MongoClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "config"))
 from settings import (
@@ -51,9 +60,35 @@ def get_latest_batch_id(db, collection_name: str) -> str | None:
     return doc["batch_id"] if doc else None
 
 
-def load_to_postgres(engine, df: pd.DataFrame, table_full: str) -> int:
+def clear_existing_batch(engine, table_full: str, batch_id: str) -> int:
+    """
+    Delete any existing rows for this batch_id from the target table
+    before inserting fresh ones. Makes extraction idempotent — safe
+    to re-run for the same batch without a primary key violation.
+
+    Returns the number of rows deleted (0 on a genuine first run).
+    """
+    with engine.begin() as conn:
+        result = conn.execute(
+            text(f"DELETE FROM {table_full} WHERE batch_id = :bid"),
+            {"bid": batch_id},
+        )
+        deleted = result.rowcount
+        if deleted:
+            log.info(
+                "Cleared %d existing row(s) for batch %s from %s before re-insert.",
+                deleted, batch_id, table_full,
+            )
+        return deleted
+
+
+def load_to_postgres(engine, df: pd.DataFrame, table_full: str, batch_id: str) -> int:
     """Load a DataFrame into a PostgreSQL raw table given as 'schema.table'."""
     schema, table = table_full.split(".")
+
+    # Idempotency guard — clear any prior rows for this batch first.
+    clear_existing_batch(engine, table_full, batch_id)
+
     df["loaded_at"] = datetime.now(timezone.utc).isoformat()
 
     df.to_sql(
@@ -81,7 +116,7 @@ def extract_collection_to_postgres(db, engine, collection_name, table_full, batc
         return 0
 
     df = pd.DataFrame(records)
-    return load_to_postgres(engine, df, table_full)
+    return load_to_postgres(engine, df, table_full, batch_id)
 
 
 def run_extraction(batch_id: str | None = None) -> dict:

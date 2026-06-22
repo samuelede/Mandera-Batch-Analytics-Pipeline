@@ -27,3 +27,6 @@ python-dotenv==1.0.1
 # Utilities
 requests==2.32.3
 python-dateutil==2.9.0
+
+# Fernet key generation (used once during Airflow setup — see README)
+cryptography==42.0.8

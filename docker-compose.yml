@@ -13,7 +13,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pipeline_secret}
       POSTGRES_DB: ${POSTGRES_DB:-mandera_warehouse}
     ports:
-      - "5432:5432"
+      - "5433:5432"   # host:container — remapped to 5433 to avoid native Postgres on 5432
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./sql:/sql:ro          # SQL files mounted read-only so psql can run them in-container
