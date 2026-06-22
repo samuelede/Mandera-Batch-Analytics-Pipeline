@@ -1,0 +1,144 @@
+name: Run Full Mandera Pipeline
+
+on:
+  # Manual trigger only, for now — this is a new workflow, test it
+  # thoroughly before considering a schedule.
+  workflow_dispatch:
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+
+    # ------------------------------------------------------------------
+    # Ephemeral services for this job only. No persistent volumes —
+    # each run starts from a blank database, which is why schema setup
+    # (normally a manual one-time step locally) is included as workflow
+    # steps below. This does NOT change or replace the local manual
+    # setup process described in the README; it is scoped to CI only.
+    # ------------------------------------------------------------------
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: pipeline
+          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD }}
+          POSTGRES_DB: mandera_warehouse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pipeline"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      minio:
+        image: quay.io/minio/minio
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: ${{ secrets.CI_MINIO_PASSWORD }}
+        ports:
+          - 9000:9000
+        # NOTE: the official minio image's default entrypoint needs an
+        # explicit command to run the server; GitHub Actions' `services:`
+        # block does not support a custom `command:` the way Docker
+        # Compose does. If this service fails to start the API on 9000,
+        # switch to running MinIO as a manual step (docker run -d ...)
+        # earlier in this job instead of as a `services:` entry — flagged
+        # here rather than silently assumed to work.
+
+    # ------------------------------------------------------------------
+    # Context-appropriate connection values — set explicitly for THIS
+    # workflow run, never inherited from a committed .env (which is
+    # gitignored and unavailable here anyway). This mirrors the same
+    # principle applied in docker-compose.yml: each execution context
+    # gets its own correct values, not a shared/guessed default.
+    #
+    # Postgres/MinIO credentials here protect a container that is
+    # created and destroyed within this single job run — they have no
+    # value outside it. They are still pulled from secrets rather than
+    # hardcoded, purely for consistency and to avoid the question
+    # being raised again by anyone reviewing this file.
+    # ------------------------------------------------------------------
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: pipeline
+      POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD }}
+      POSTGRES_DB: mandera_warehouse
+      MINIO_ENDPOINT: http://localhost:9000
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: ${{ secrets.CI_MINIO_PASSWORD }}
+      MINIO_BUCKET: mandera-raw
+      MONGO_URI: ${{ secrets.MONGO_URI }}
+      MONGO_DB: ${{ secrets.MONGO_DB }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      # ------------------------------------------------------------------
+      # Schema setup — required every run since the postgres service
+      # container starts blank. This is CI-only; it does not replace the
+      # manual local setup steps in the README.
+      # ------------------------------------------------------------------
+      - name: Create raw tables
+        run: psql "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" -f sql/create_raw_tables.sql
+
+      - name: Create staging tables
+        run: psql "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" -f sql/create_staging_tables.sql
+
+      - name: Create monitoring tables
+        run: psql "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" -f sql/monitoring_tables.sql
+
+      # ------------------------------------------------------------------
+      # Pipeline stages — same scripts used locally and in Airflow,
+      # unmodified. Only the environment variables differ.
+      # ------------------------------------------------------------------
+      - name: Generate synthetic data → MongoDB Atlas
+        id: generate
+        run: |
+          python generator/data_generator.py | tee generate_output.log
+          BATCH_ID=$(grep -oP 'batch_id\s*:\s*\K\S+' generate_output.log | tail -1)
+          echo "batch_id=$BATCH_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Extract MongoDB → MinIO
+        run: python extraction/extract_mongo_to_minio.py --batch-id "${{ steps.generate.outputs.batch_id }}"
+
+      - name: Extract MongoDB → PostgreSQL raw tables
+        run: python extraction/extract_mongo_to_postgres.py --batch-id "${{ steps.generate.outputs.batch_id }}"
+
+      - name: Validate batch counts
+        run: python validation/validate_batch_counts.py --batch-id "${{ steps.generate.outputs.batch_id }}"
+
+      - name: Record batch log
+        run: python maintenance/record_batch_log.py --run-id "${{ steps.generate.outputs.batch_id }}"
+
+      - name: Transform customers
+        run: python transformation/transform_customers.py --batch-id "${{ steps.generate.outputs.batch_id }}"
+
+      - name: Transform products
+        run: python transformation/transform_products.py --batch-id "${{ steps.generate.outputs.batch_id }}"
+
+      - name: Transform orders
+        run: python transformation/transform_orders.py --batch-id "${{ steps.generate.outputs.batch_id }}"
+
+      - name: Validate data quality
+        run: python validation/validate_data_quality.py --batch-id "${{ steps.generate.outputs.batch_id }}"
+
+      - name: Truncate raw tables
+        run: python maintenance/truncate_raw_tables.py --batch-id "${{ steps.generate.outputs.batch_id }}"
+
+      - name: Log summary
+        if: always()
+        run: echo "Pipeline run complete for batch ${{ steps.generate.outputs.batch_id }} at $(date -u '+%Y-%m-%d %H:%M UTC')"

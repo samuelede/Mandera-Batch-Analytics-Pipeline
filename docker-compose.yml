@@ -100,10 +100,24 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     env_file:
       - .env
     environment:
       AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      # Explicit internal values — NOT inherited from .env's
+      # POSTGRES_HOST/POSTGRES_PORT, which are set to localhost:5433
+      # for host-side script testing and would be wrong here.
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-pipeline}:${POSTGRES_PASSWORD:-pipeline_secret}@postgres:5432/${POSTGRES_DB:-mandera_warehouse}
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER:-pipeline}:${POSTGRES_PASSWORD:-pipeline_secret}@postgres:5432/${POSTGRES_DB:-mandera_warehouse}
+      # Override .env's host-side values so config/settings.py (used
+      # by every DAG task and the failure/SLA callbacks) also connects
+      # via the internal service name/port, not localhost:5433.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      MINIO_ENDPOINT: http://minio:9000
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./config:/opt/airflow/config
@@ -131,10 +145,18 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     env_file:
       - .env
     environment:
       AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-pipeline}:${POSTGRES_PASSWORD:-pipeline_secret}@postgres:5432/${POSTGRES_DB:-mandera_warehouse}
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER:-pipeline}:${POSTGRES_PASSWORD:-pipeline_secret}@postgres:5432/${POSTGRES_DB:-mandera_warehouse}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      MINIO_ENDPOINT: http://minio:9000
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./config:/opt/airflow/config
@@ -160,10 +182,18 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     env_file:
       - .env
     environment:
       AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-pipeline}:${POSTGRES_PASSWORD:-pipeline_secret}@postgres:5432/${POSTGRES_DB:-mandera_warehouse}
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER:-pipeline}:${POSTGRES_PASSWORD:-pipeline_secret}@postgres:5432/${POSTGRES_DB:-mandera_warehouse}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      MINIO_ENDPOINT: http://minio:9000
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./config:/opt/airflow/config

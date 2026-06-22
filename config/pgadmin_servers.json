@@ -6,8 +6,7 @@
       "Host": "postgres",
       "Port": 5432,
       "MaintenanceDB": "mandera_warehouse",
-      "Username": "mandera",
-      "PassFile": "/pgpass",
+      "Username": "pipeline",
       "SSLMode": "prefer"
     }
   }
