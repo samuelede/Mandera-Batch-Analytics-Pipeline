@@ -125,6 +125,10 @@ NUMBER_OF_BATCHES = int(os.getenv("NUMBER_OF_BATCHES", 2))
 # Scheduled run hours (UTC) — must match .github/workflows/generate_data.yml cron
 BATCH_SCHEDULE_HOURS = [7, 15]
 
+# ── Airflow retry policy ────────────────────────────────────────
+AIRFLOW_RETRIES = int(os.getenv("AIRFLOW_RETRIES", 2))
+AIRFLOW_RETRY_DELAY = int(os.getenv("AIRFLOW_RETRY_DELAY", 200))  # seconds
+
 
 def generate_batch_id() -> str:
     """
