@@ -1,0 +1,187 @@
+services:
+
+  # ─────────────────────────────────────────────────────────────
+  # PostgreSQL — warehouse (raw + staging + monitoring schemas)
+  # also used as Airflow's metadata database
+  # ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15
+    container_name: mandera-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pipeline}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pipeline_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-mandera_warehouse}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql:/sql:ro          # SQL files mounted read-only so psql can run them in-container
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pipeline}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mandera-net
+
+  # ─────────────────────────────────────────────────────────────
+  # MinIO — object storage / data lake
+  # ─────────────────────────────────────────────────────────────
+  minio:
+    image: quay.io/minio/minio
+    container_name: mandera-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mandera-net
+
+  # ─────────────────────────────────────────────────────────────
+  # pgAdmin — optional GUI for PostgreSQL, auto-connects via
+  # config/pgadmin_servers.json
+  # ─────────────────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: mandera-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@mandera.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - ./config/pgadmin_servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mandera-net
+
+  # ─────────────────────────────────────────────────────────────
+  # Redis — Celery broker for Airflow's CeleryExecutor
+  # ─────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7
+    container_name: mandera-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mandera-net
+
+  # ─────────────────────────────────────────────────────────────
+  # Airflow webserver
+  # ─────────────────────────────────────────────────────────────
+  airflow-webserver:
+    image: apache/airflow:2.9.2
+    container_name: mandera-airflow-webserver
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./config:/opt/airflow/config
+      - ./generator:/opt/airflow/generator
+      - ./extraction:/opt/airflow/extraction
+      - ./transformation:/opt/airflow/transformation
+      - ./validation:/opt/airflow/validation
+      - ./maintenance:/opt/airflow/maintenance
+      - airflow_logs:/opt/airflow/logs
+    ports:
+      - "8080:8080"
+    command: webserver
+    networks:
+      - mandera-net
+
+  # ─────────────────────────────────────────────────────────────
+  # Airflow scheduler
+  # ─────────────────────────────────────────────────────────────
+  airflow-scheduler:
+    image: apache/airflow:2.9.2
+    container_name: mandera-airflow-scheduler
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./config:/opt/airflow/config
+      - ./generator:/opt/airflow/generator
+      - ./extraction:/opt/airflow/extraction
+      - ./transformation:/opt/airflow/transformation
+      - ./validation:/opt/airflow/validation
+      - ./maintenance:/opt/airflow/maintenance
+      - airflow_logs:/opt/airflow/logs
+    command: scheduler
+    networks:
+      - mandera-net
+
+  # ─────────────────────────────────────────────────────────────
+  # Airflow Celery worker
+  # ─────────────────────────────────────────────────────────────
+  airflow-worker:
+    image: apache/airflow:2.9.2
+    container_name: mandera-airflow-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./config:/opt/airflow/config
+      - ./generator:/opt/airflow/generator
+      - ./extraction:/opt/airflow/extraction
+      - ./transformation:/opt/airflow/transformation
+      - ./validation:/opt/airflow/validation
+      - ./maintenance:/opt/airflow/maintenance
+      - airflow_logs:/opt/airflow/logs
+    command: celery worker
+    networks:
+      - mandera-net
+
+networks:
+  mandera-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  minio_data:
+  airflow_logs:

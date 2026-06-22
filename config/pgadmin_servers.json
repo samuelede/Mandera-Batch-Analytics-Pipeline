@@ -1,12 +1,12 @@
 {
   "Servers": {
     "1": {
-      "Name": "Begine Fusion Warehouse",
+      "Name": "Mandera Warehouse",
       "Group": "Servers",
       "Host": "postgres",
       "Port": 5432,
-      "MaintenanceDB": "begine_fusion_warehouse",
-      "Username": "pipeline",
+      "MaintenanceDB": "mandera_warehouse",
+      "Username": "mandera",
       "PassFile": "/pgpass",
       "SSLMode": "prefer"
     }

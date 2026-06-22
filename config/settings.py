@@ -20,7 +20,7 @@ load_dotenv()
 
 # ── MongoDB Atlas ──────────────────────────────────────────────
 MONGO_URI = os.getenv("MONGO_URI")
-MONGO_DB = os.getenv("MONGO_DB", "mandera-db")
+MONGO_DB = os.getenv("MONGO_DB")
 
 
 def validate_mongo_config() -> None:
@@ -38,9 +38,9 @@ def validate_mongo_config() -> None:
 
 
 MONGO_COLLECTIONS = {
-    "customers": "customers",
-    "products": "products",
-    "orders": "orders",
+    "customers": "raw_customers",
+    "products": "raw_products",
+    "orders": "raw_orders",
 }
 
 

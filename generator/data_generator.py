@@ -40,7 +40,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 MONGO_URI    = os.getenv("MONGO_URI")
-MONGO_DB     = os.getenv("MONGO_DB_NAME", "mandera_db")
+MONGO_DB     = os.getenv("MONGO_DB")
 BATCH_SIZE   = int(os.getenv("BATCH_SIZE", 500))
 
 # Derived counts — orders are the most numerous entity

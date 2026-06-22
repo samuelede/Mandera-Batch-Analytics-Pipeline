@@ -46,6 +46,20 @@ Python + Faker ──► MongoDB Atlas (Operational Source)
 
 ---
 
+## Important: Where Each Service Runs
+
+**MongoDB Atlas is cloud-hosted** — reached over the internet via `MONGO_URI`, no local setup needed beyond an Atlas account.
+
+**PostgreSQL, MinIO, Redis, pgAdmin, and Airflow all run as Docker containers**, defined in `docker-compose.yml`. They are not installed natively on your host machine.
+
+This matters because of **hostname resolution**:
+- Inside the Docker network, services reach each other by container name: `postgres`, `minio`, `redis`.
+- From your host shell (e.g. running `python extraction/extract_mongo_to_postgres.py` directly in Git Bash), those names don't resolve — Windows has no machine called `postgres` or `minio`. You must use `localhost` instead when testing scripts standalone, then switch back to the service names when those scripts run as Airflow tasks inside the Docker network.
+
+See Section 8 below for the exact `.env` values to use in each case.
+
+---
+
 ## Configuration
 
 All connection strings, table name mappings, and pipeline constants live in `config/settings.py` — no module hardcodes a DSN or table name directly. Bad-data injection rates live separately in `config/data_quality.py`, which has no database awareness at all, so the `faker_*.py` generators can run standalone with zero `.env` setup.
@@ -70,9 +84,7 @@ The generator deliberately injects realistic data problems into every batch, con
 | Products | Missing names, invalid/zero prices, category mismatches, schema drift (`legacy_discount_code`), duplicate records |
 | Orders | Missing `product_id`, invalid/negative `total_amount`, invalid `order_status`, duplicate records |
 
-Duplicates are injected at the batch level (after generation) rather than per-record, since duplication is inherently a cross-record concern — `inject_duplicates()` walks the generated batch and probabilistically overwrites later records with a copy of an earlier one's fields, keeping the original primary key.
-
-This is what makes the validation layer meaningful — `validate_data_quality.py` and `validate_batch_counts.py` exist specifically to catch these issues downstream.
+Duplicates are injected at the batch level (after generation), since duplication is inherently a cross-record concern — `inject_duplicates()` walks the generated batch and probabilistically overwrites later records with a copy of an earlier one's fields, keeping the original primary key.
 
 > **Note:** with duplicate injection plus multiple bad-record categories compounding, raw → staging variance will often exceed the default 5% `VARIANCE_THRESHOLD` in `validate_batch_counts.py`. This is expected given the deliberately noisy generator — `WARN` status here is informational, not necessarily a pipeline failure.
 
@@ -116,6 +128,7 @@ mandera_pipeline/
 ├── .github/
 │   └── workflows/
 │       └── generate_data.yml   # Scheduled GitHub Actions cron for daily data generation
+├── docker-compose.yml           # PostgreSQL, MinIO, Redis, pgAdmin, Airflow containers
 ├── .env.example                # Environment variable template — safe to commit
 ├── requirements.txt
 └── README.md
@@ -164,68 +177,70 @@ cp .env.example .env
 3. Choose a cloud provider and region closest to you, then click **Create**.
 4. Under **Security → Database Access**, create a database user with a username and password — save these for your `.env`.
 5. Under **Security → Network Access**, click **Add IP Address** → **Allow Access from Anywhere** (`0.0.0.0/0`) for local development.
-6. Once the cluster is provisioned, click **Connect** → **Drivers**, select **Python**, and copy the connection string. It will look like:
-```
-mongodb+srv://<username>:<password>@<cluster>.mongodb.net/?retryWrites=true&w=majority&appName=<AppName>
-```
-7. Paste it into your `.env` as `MONGO_URI`, replacing `<username>` and `<password>` with your database user credentials.
-8. Set `MONGO_DB` to the database name the pipeline will use:
-```
-MONGO_DB=mandera-db
-```
-9. The generator will create three collections automatically on first run, as defined in `config/settings.py` → `MONGO_COLLECTIONS`: `customers`, `products`, `orders`.
+6. Once the cluster is provisioned, click **Connect** → **Drivers**, select **Python**, and copy the connection string.
+7. Paste it into your `.env` as `MONGO_URI`.
+8. Set `MONGO_DB` to the actual database name visible in Atlas Data Explorer — **note: this is the database name, not the cluster name.** Cluster names and database names are independent; Atlas lets a cluster called `mandera-db` contain a database called `mandera_db`, for example. Always confirm in Atlas Data Explorer rather than assuming they match.
+9. Set `MONGO_COLLECTIONS` (in `config/settings.py`) to match the actual collection names `data_generator.py` writes to — verify these exist in Atlas Data Explorer before running extraction.
 
-### 6. Set Up PostgreSQL
+### 6. Start Docker Services (PostgreSQL, MinIO, Redis, Airflow)
+
+#### 6.1 Generate a Fernet key for Airflow
+
+`.env.example` ships with a placeholder — Airflow needs a real encryption key or it will fail to start:
 
 ```bash
-psql -U postgres -c "CREATE DATABASE mandera_warehouse;"
-psql -U postgres -d mandera_warehouse -f sql/create_raw_tables.sql
-psql -U postgres -d mandera_warehouse -f sql/create_staging_tables.sql
-psql -U postgres -d mandera_warehouse -f sql/monitoring_tables.sql
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-This creates `raw.customers_raw`, `raw.products_raw`, `raw.orders_raw` and their `staging.*_clean` counterparts — matching the `RAW_TABLES`/`STAGING_TABLES` mappings in `config/settings.py`. If you ever rename a table in the SQL files, update `settings.py` to match, or every downstream script will break.
+Paste the output into `.env`:
+```
+AIRFLOW__CORE__FERNET_KEY=<paste_generated_key_here>
+```
 
-### 7. Start MinIO (Docker)
+#### 6.2 Start PostgreSQL, MinIO, and Redis first
 
 ```bash
-docker run -d \
-  --name mandera-minio \
-  -p 9000:9000 -p 9001:9001 \
-  -e MINIO_ROOT_USER=minioadmin \
-  -e MINIO_ROOT_PASSWORD=minioadmin123 \
-  -v minio_data:/data \
-  quay.io/minio/minio server /data --console-address ":9001"
+docker compose up -d postgres minio redis
+docker compose ps   # wait until all three report "healthy"
 ```
 
-Access MinIO Console: http://localhost:9001
+#### 6.3 Create the warehouse schema (run once)
 
-### 8. Set Up Apache Airflow
+`psql` runs **inside** the `postgres` container — there is no `psql` installed on your host. The `sql/` folder is mounted read-only into the container at `/sql`, so run it via `docker exec`:
 
 ```bash
-export AIRFLOW_HOME=$(pwd)/airflow
+# If mandera_warehouse doesn't exist yet:
+docker exec -it mandera-postgres psql -U pipeline -c "CREATE DATABASE mandera_warehouse;"
 
-airflow db init
-
-airflow users create \
-  --username admin \
-  --password admin \
-  --firstname Mandera \
-  --lastname Admin \
-  --role Admin \
-  --email admin@mandera.com
-
-# Copy DAG
-cp airflow/dags/mandera_pipeline_dag.py $AIRFLOW_HOME/dags/
-
-# Start services
-airflow webserver --port 8080 &
-airflow scheduler &
+docker exec -it mandera-postgres psql -U pipeline -d mandera_warehouse -f /sql/create_raw_tables.sql
+docker exec -it mandera-postgres psql -U pipeline -d mandera_warehouse -f /sql/create_staging_tables.sql
+docker exec -it mandera-postgres psql -U pipeline -d mandera_warehouse -f /sql/monitoring_tables.sql
 ```
 
-Access Airflow UI: http://localhost:8080
+#### 6.4 Initialize Airflow's metadata database (run once)
 
-### 9. Run Data Generator Manually
+```bash
+docker compose run --rm airflow-webserver airflow db init
+
+docker compose run --rm airflow-webserver airflow users create \
+  --username admin --password admin \
+  --firstname Mandera --lastname Admin \
+  --role Admin --email admin@mandera.com
+```
+
+#### 6.5 Start Airflow
+
+```bash
+docker compose up -d airflow-webserver airflow-scheduler airflow-worker
+```
+
+| Service | URL |
+|---|---|
+| Airflow UI | http://localhost:8080 |
+| MinIO Console | http://localhost:9001 |
+| pgAdmin | http://localhost:5050 |
+
+### 7. Run Data Generator Manually
 
 ```bash
 python generator/data_generator.py
@@ -238,6 +253,18 @@ python generator/faker_customers.py
 python generator/faker_products.py
 python generator/faker_orders.py
 ```
+
+### 8. Running Pipeline Scripts From Your Host Shell (Standalone Testing)
+
+If you run `extraction/`, `transformation/`, `validation/`, or `maintenance/` scripts **directly from your shell** rather than as Airflow tasks, your `.env` must point to `localhost`, not Docker service names — `postgres`, `minio`, and `redis` only resolve from **inside** the Docker network.
+
+For standalone host-side testing, temporarily set in `.env`:
+```
+POSTGRES_HOST=localhost
+MINIO_ENDPOINT=http://localhost:9000
+```
+
+Switch them back to `postgres` / `minio` once these scripts run as Airflow tasks inside the Docker network — the DAG containers resolve those names correctly because they're on the same Docker network.
 
 ---
 
