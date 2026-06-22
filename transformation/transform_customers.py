@@ -16,9 +16,10 @@ Required transformations implemented (in order):
 2. Null replacement    — customer_id is the only field that, if
                           missing, makes a record unsalvageable and is
                           dropped. Every other null/invalid field is
-                          replaced with a sensible default:
+                          replaced:
                             email (missing OR invalid format)
-                                              -> 'unknown@unknown.com'
+                                              -> unique per-row
+                                                 placeholder (see below)
                             city              -> 'Unknown'
                             segment           -> 'unknown'
                             is_active         -> False
@@ -26,16 +27,17 @@ Required transformations implemented (in order):
                           is_active cast to BOOLEAN.
 4. Standardized naming — email lowercased + stripped, city/segment
                           stripped and title-cased / lowercased.
-5. Derived field        — full_name = first_name + ' ' + last_name,
-                          customer_tenure_days = days since
-                          registration_date.
+5. Derived field        — full_name, customer_tenure_days.
 
-EMAIL VALIDATION: a basic regex check catches the invalid_email_rate
-injected bad records (e.g. "invalid_email@@"), which a missing-value
-check alone does NOT catch since the field is present, just malformed.
-Invalid-format emails are replaced with the same placeholder used for
-missing emails, since fabricating a plausible-but-fake email would be
-no more honest than leaving the malformed one.
+EMAIL PLACEHOLDER UNIQUENESS: a basic regex catches both missing AND
+invalid-format emails (e.g. "invalid_email@@"), which a missing-value
+check alone would not catch. Each replaced email gets a placeholder
+keyed to that row's own customer_id (e.g.
+"unknown-a1b2c3d4@unknown.com") rather than one shared constant
+string. Using a single shared placeholder for every bad email would
+make unrelated customers look like duplicates of each other under
+the duplicate_email check in validate_data_quality.py — a genuine
+side effect discovered after this fix shipped, not a hypothetical.
 
 Usage:
     python transformation/transform_customers.py --batch-id <batch_id>
@@ -64,9 +66,6 @@ log = logging.getLogger(__name__)
 RAW_TABLE     = RAW_TABLES["customers"]      # raw.customers_raw
 STAGING_TABLE = STAGING_TABLES["customers"]  # staging.customers_clean
 
-# Intentionally simple — this is a format sanity check, not full RFC 5322
-# validation. It's enough to catch "invalid_email@@" while accepting any
-# normal address.
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -90,6 +89,16 @@ def is_valid_email(value) -> bool:
     if pd.isna(value) or not isinstance(value, str) or value.strip() == "":
         return False
     return bool(EMAIL_PATTERN.match(value.strip()))
+
+
+def placeholder_email(customer_id: str) -> str:
+    """
+    Build a placeholder email unique to this row, using the first 8
+    characters of customer_id, so two different customers with bad
+    emails never collide into an apparent duplicate.
+    """
+    short_id = str(customer_id)[:8] if pd.notna(customer_id) else "00000000"
+    return f"unknown-{short_id}@unknown.com"
 
 
 def transform_customers(batch_id: str) -> dict:
@@ -119,22 +128,21 @@ def transform_customers(batch_id: str) -> dict:
     if duplicates_removed:
         log.info("Removed %d duplicate customer_id row(s).", duplicates_removed)
 
-    # Unsalvageable: a record with no customer_id cannot be tracked at all.
     df = df.dropna(subset=["customer_id"])
 
     # ------------------------------------------------------------------
     # 2. NULL REPLACEMENT (record is kept, value is filled)
     # ------------------------------------------------------------------
-    # Email: catches BOTH missing (None/"") AND invalid-format
-    # ("invalid_email@@") in one pass — a missing-value check alone
-    # would not catch the invalid-format case, since the field is
-    # present, just malformed.
     invalid_email_mask = ~df["email"].apply(is_valid_email)
     invalid_email_count = invalid_email_mask.sum()
-    df.loc[invalid_email_mask, "email"] = "unknown@unknown.com"
+    df.loc[invalid_email_mask, "email"] = df.loc[invalid_email_mask, "customer_id"].apply(
+        placeholder_email
+    )
     if invalid_email_count:
         log.info(
-            "Replaced %d missing/invalid-format email value(s) with placeholder.",
+            "Replaced %d missing/invalid-format email value(s) with a "
+            "per-row unique placeholder (not a shared constant) to "
+            "avoid false duplicate_email collisions.",
             invalid_email_count,
         )
 
@@ -180,7 +188,6 @@ def transform_customers(batch_id: str) -> dict:
         staged_count, dropped, duplicates_removed, invalid_email_count,
     )
 
-    # --- Idempotency guard — clear any prior rows for this batch first ---
     clear_existing_batch(engine, STAGING_TABLE, batch_id)
 
     schema, table = STAGING_TABLE.split(".")
