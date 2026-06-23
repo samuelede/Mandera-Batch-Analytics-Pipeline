@@ -142,6 +142,16 @@ def run_generator() -> dict:
         log.info("  %-22s: %s", key, val)
     log.info("=" * 60)
 
+    # Write batch_id to a dedicated file for CI/automation to read
+    # directly, rather than parsing it out of prose log lines (fragile
+    # — breaks the moment a log message's wording changes). This has
+    # no effect on local or Airflow usage; it's purely additive.
+    batch_id_file = os.getenv("BATCH_ID_OUTPUT_FILE")
+    if batch_id_file:
+        with open(batch_id_file, "w") as f:
+            f.write(batch_id)
+        log.info("Wrote batch_id to %s", batch_id_file)
+
     return summary
 
 
