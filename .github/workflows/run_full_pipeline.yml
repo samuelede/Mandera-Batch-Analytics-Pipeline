@@ -1,8 +1,13 @@
 name: Run Full Mandera Pipeline
 
 on:
-  # Manual trigger only, for now — this is a new workflow, test it
-  # thoroughly before considering a schedule.
+  push:
+    branches: [main]
+
+  pull_request:
+    branches: [main]
+
+  # Manual trigger also available for ad-hoc testing
   workflow_dispatch:
 
 jobs:
@@ -31,20 +36,14 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
-      minio:
-        image: quay.io/minio/minio
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: ${{ secrets.CI_MINIO_PASSWORD }}
-        ports:
-          - 9000:9000
-        # NOTE: the official minio image's default entrypoint needs an
-        # explicit command to run the server; GitHub Actions' `services:`
-        # block does not support a custom `command:` the way Docker
-        # Compose does. If this service fails to start the API on 9000,
-        # switch to running MinIO as a manual step (docker run -d ...)
-        # earlier in this job instead of as a `services:` entry — flagged
-        # here rather than silently assumed to work.
+      # NOTE: MinIO is NOT defined here as a `services:` entry — GitHub
+      # Actions' services: block does not support passing a custom
+      # `command:`, and the official minio/minio image requires
+      # `server /data` explicitly to actually start its S3 API. Without
+      # it the container starts but nothing listens on port 9000
+      # (confirmed: this caused a "Connection refused" failure on first
+      # real run). MinIO is started manually via `docker run` instead —
+      # see the "Start MinIO" step below.
 
     # ------------------------------------------------------------------
     # Context-appropriate connection values — set explicitly for THIS
@@ -87,6 +86,28 @@ jobs:
       - name: Install psql client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
+      - name: Start MinIO
+        run: |
+          docker run -d \
+            --name ci-minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER="${MINIO_ROOT_USER}" \
+            -e MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD}" \
+            quay.io/minio/minio server /data
+          # Wait for the API to actually accept connections before any
+          # later step tries to use it — services: provides a
+          # health-check wait automatically, but a plain docker run
+          # step does not, so we poll for it explicitly.
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:9000/minio/health/live; then
+              echo "MinIO is up."
+              break
+            fi
+            echo "Waiting for MinIO... ($i/15)"
+            sleep 2
+          done
+
+
       # ------------------------------------------------------------------
       # Schema setup — required every run since the postgres service
       # container starts blank. This is CI-only; it does not replace the
@@ -107,9 +128,15 @@ jobs:
       # ------------------------------------------------------------------
       - name: Generate synthetic data → MongoDB Atlas
         id: generate
+        env:
+          BATCH_ID_OUTPUT_FILE: ${{ runner.temp }}/batch_id.txt
         run: |
-          python generator/data_generator.py | tee generate_output.log
-          BATCH_ID=$(grep -oP 'batch_id\s*:\s*\K\S+' generate_output.log | tail -1)
+          python generator/data_generator.py
+          BATCH_ID=$(cat "${BATCH_ID_OUTPUT_FILE}")
+          if [ -z "$BATCH_ID" ]; then
+            echo "::error::batch_id file was empty — generator may have failed silently."
+            exit 1
+          fi
           echo "batch_id=$BATCH_ID" >> "$GITHUB_OUTPUT"
 
       - name: Extract MongoDB → MinIO
