@@ -13,25 +13,32 @@ Usage:
     python generator/data_generator.py
 """
 
+import sys
 import os
 import uuid
 import logging
 from datetime import datetime, timezone
 
-from dotenv import load_dotenv
 from pymongo import MongoClient
 from pymongo.errors import BulkWriteError
+
+# ---------------------------------------------------------------------------
+# Path setup — MUST run before any local imports below. Relative to this
+# file's own location, so it works the same way whether run locally
+# (python generator/data_generator.py) or from a CI checkout
+# (e.g. GitHub Actions, where the working directory is the repo root).
+# ---------------------------------------------------------------------------
+sys.path.append(os.path.dirname(__file__))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "config"))
 
 from faker_customers import generate_customers
 from faker_products import generate_products
 from faker_orders import generate_orders
-from config.settings import validate_mongo_config
+from settings import MONGO_URI, MONGO_DB, validate_mongo_config
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-load_dotenv()
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -39,9 +46,11 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-MONGO_URI    = os.getenv("MONGO_URI")
-MONGO_DB     = os.getenv("MONGO_DB")
-BATCH_SIZE   = int(os.getenv("BATCH_SIZE", 500))
+# MONGO_URI / MONGO_DB are sourced from settings.py — the single source
+# of truth for connection config — not re-read here via os.getenv()
+# directly, which would duplicate (and could drift from) settings.py's
+# own defaults and validation logic.
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", 500))
 
 # Derived counts — orders are the most numerous entity
 CUSTOMER_COUNT = max(50,  BATCH_SIZE // 5)
@@ -53,10 +62,7 @@ ORDER_COUNT    = BATCH_SIZE
 # MongoDB helpers
 # ---------------------------------------------------------------------------
 def get_mongo_client() -> MongoClient:
-    if not MONGO_URI:
-        raise EnvironmentError(
-            "MONGO_URI is not set. Check your .env file."
-        )
+    validate_mongo_config()
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=10_000)
     # Verify connection
     client.admin.command("ping")
@@ -87,8 +93,6 @@ def insert_records(collection, records: list[dict], label: str) -> int:
 # Main
 # ---------------------------------------------------------------------------
 def run_generator() -> dict:
-    validate_mongo_config();
-    
     batch_id   = str(uuid.uuid4())
     batch_time = datetime.now(timezone.utc).isoformat()
 
