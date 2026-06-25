@@ -16,6 +16,7 @@ Mandera Analytics needed a way to turn continuous operational transaction data i
 ## Architecture Overview
 
 ![Mandera Architecture Diagram](docs/mandera_architecture_diagram.png)
+
 ---
 
 ## Technology Stack
@@ -156,6 +157,15 @@ Or trigger the full DAG via the Airflow UI at `http://localhost:8080` (unpause `
 | MinIO Console | http://localhost:9001 |
 | pgAdmin | http://localhost:5050 |
 
+---
+
+### What success looks like
+ 
+Once triggered, every task should turn green in dependency order - `start` → `generate_data` → parallel extraction → parallel monitoring → parallel transforms → `validate_data_quality` → `truncate_raw_tables` → `end`:
+ 
+![Airflow DAG graph - full pipeline succeeded](./docs/airflow_dag_graph.png)
+ 
+If a task instead shows orange (`upstream_failed`), check the task immediately upstream first - Airflow won't run a task whose dependency failed.
 ---
 
 ## Pipeline Stages
