@@ -92,7 +92,9 @@ services:
   # Airflow webserver
   # ─────────────────────────────────────────────────────────────
   airflow-webserver:
-    image: apache/airflow:2.9.2
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
     container_name: mandera-airflow-webserver
     restart: unless-stopped
     depends_on:
@@ -137,7 +139,9 @@ services:
   # Airflow scheduler
   # ─────────────────────────────────────────────────────────────
   airflow-scheduler:
-    image: apache/airflow:2.9.2
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
     container_name: mandera-airflow-scheduler
     restart: unless-stopped
     depends_on:
@@ -174,7 +178,9 @@ services:
   # Airflow Celery worker
   # ─────────────────────────────────────────────────────────────
   airflow-worker:
-    image: apache/airflow:2.9.2
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
     container_name: mandera-airflow-worker
     restart: unless-stopped
     depends_on:

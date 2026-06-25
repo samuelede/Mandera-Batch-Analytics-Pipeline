@@ -1,0 +1,39 @@
+# requirements-airflow.txt
+#
+# Used ONLY inside Dockerfile.airflow, for the Airflow containers.
+#
+# IMPORTANT: every package below is UNPINNED, deliberately. Two
+# separate failures this session proved that an exact pin (==x.y.z)
+# in this file ALWAYS overrides Airflow's --constraint file during
+# pip's resolution, even when the constraint explicitly disagrees:
+#
+#   1. sqlalchemy==2.0.30 pinned here silently won over the
+#      constraint, reintroducing:
+#        sqlalchemy.exc.ArgumentError: Type annotation for
+#        "TaskInstance.dag_model" can't be correctly interpreted...
+#
+#   2. pandas==2.2.2 pinned here conflicted outright with the
+#      constraint's pandas==2.1.4, and pip refused to build at all:
+#        ResolutionImpossible
+#
+# Fix: remove every version pin from this file. With no pin, pip is
+# free to honor whatever version the constraints file specifies for
+# any package Airflow has tested against — and for packages Airflow
+# has no opinion about (faker, minio, dnspython, etc.), pip picks the
+# latest compatible release on its own.
+#
+# requirements.txt (used for local/host development) keeps its exact
+# pins as before — the two environments don't share a Python install,
+# so they're free to diverge in package versions.
+
+faker
+pymongo
+dnspython
+psycopg2-binary
+pandas
+pyarrow
+minio
+python-dotenv
+requests
+python-dateutil
+cryptography

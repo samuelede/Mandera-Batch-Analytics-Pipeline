@@ -29,6 +29,7 @@ Mandera Analytics needed a way to turn continuous operational transaction data i
 | Warehouse | PostgreSQL |
 | Transformation | Pandas |
 | Orchestration | Apache Airflow (CeleryExecutor + Redis) |
+| Custom Airflow Image | Dockerfile.airflow |
 
 ---
 
@@ -51,6 +52,29 @@ Mandera Analytics needed a way to turn continuous operational transaction data i
 
 `config/data_quality.py` controls bad-data injection rates per entity (missing/invalid emails, non-positive prices, invalid statuses, category mismatches, duplicates) and has zero database awareness - the `faker_*.py` generators can run standalone with no `.env` at all.
 
+---
+
+## Dependency Management - Two Separate Requirements Files
+ 
+`requirements.txt` pins exact versions for local/host development.
+`requirements-airflow.txt` is used only inside `Dockerfile.airflow`
+and deliberately leaves every package **unpinned**.
+ 
+This split exists because Airflow 2.9.2 ships with its own
+`--constraint` file pinning compatible dependency versions (notably
+SQLAlchemy ~1.4.x). An exact pin in a requirements file always
+overrides a constraint file in pip's resolution - so pinning
+`sqlalchemy==2.0.x` or `pandas==2.2.2` inside the Airflow image broke
+Airflow's own ORM models outright. Leaving `requirements-airflow.txt`
+unpinned lets Airflow's constraints win for any package it has tested
+against, while `requirements.txt` keeps full reproducibility for
+local development.
+ 
+**`pandas` and `pyarrow` are intentionally NOT bumped** to their
+current major releases in `requirements.txt` - pandas 3.0 has
+confirmed breaking changes, and every `transform_*.py` script was
+developed and tested against pandas 2.2.2. Don't bump these without
+re-testing the transform scripts first.
 ---
 
 ## Quick Start
@@ -78,11 +102,25 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 ```
 Paste the output into `.env` as `AIRFLOW__CORE__FERNET_KEY`.
 
-### 4. Start Docker services
-
+### 4. Build and start Docker services
+ 
+The Airflow containers build from `Dockerfile.airflow` (which installs
+this project's own dependencies on top of the stock Airflow image) -
+this build step is required before the first `up`, or Docker will
+silently fall back to an image with none of your project's packages
+installed.
+ 
 ```bash
+docker compose build airflow-webserver airflow-scheduler airflow-worker
 docker compose up -d
 docker compose ps   # confirm postgres, minio, redis show "healthy"
+```
+ 
+If you change `requirements-airflow.txt` later, rebuild with
+`--no-cache` to force a clean reinstall:
+```bash
+docker compose build --no-cache airflow-webserver airflow-scheduler airflow-worker
+docker compose up -d --force-recreate airflow-webserver airflow-scheduler airflow-worker
 ```
 
 ### 5. Create the database schema (manual - see Known Limitations)
@@ -155,7 +193,14 @@ Two independent workflows in `.github/workflows/`:
 ## Known Limitations
 
 - **Schema setup is manual**, both locally and is re-run fresh in every CI job - there's no `airflow-init`-style automated step yet for local Docker setup. Tracked as a deliberate, deferred improvement.
-- **Bad-data injection rates** (`config/data_quality.py`) are aggressive by design (~0.3–0.4 per field) - staging can legitimately retain well under half of a raw batch. This is intentional stress-testing of the validation layer, not a defect.
+- **Bad-data injection rates** (`config/data_quality.py`) are aggressive by design (~0.3–0.4 per field) - staging can     legitimately retain well under half of a raw batch. This is intentional stress-testing of the validation layer, not a defect.
+- **Airflow's container requires a separate, unpinned requirements
+  file** (`requirements-airflow.txt`) rather than reusing
+  `requirements.txt` directly - see "Dependency Management" above.
+  Forgetting to rebuild after changing this file is a common source
+  of confusing `ModuleNotFoundError` or `ResolutionImpossible` errors;
+  always rebuild explicitly, don't rely on `docker compose up` alone
+  to pick up Dockerfile changes.
 
 ---
 
