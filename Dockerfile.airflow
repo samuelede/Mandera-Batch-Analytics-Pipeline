@@ -1,0 +1,38 @@
+# Dockerfile.airflow
+# ------------------------------------------------------------------
+# Extends the official Apache Airflow image with this project's own
+# dependencies (pymongo, pandas, sqlalchemy, minio, faker, etc.).
+#
+# CRITICAL — two issues found and fixed here, in order:
+#
+# 1. Installing requirements.txt directly upgraded SQLAlchemy to
+#    2.0.30, breaking Airflow 2.9.2's own internal ORM models
+#    (built against SQLAlchemy ~1.4.x's declarative system):
+#      sqlalchemy.exc.ArgumentError: Type annotation for
+#      "TaskInstance.dag_model" can't be correctly interpreted...
+#
+# 2. Adding --constraint alone did NOT fix it, because requirements.txt
+#    pins sqlalchemy==2.0.30 explicitly — pip treats an exact pin in a
+#    requirements file as taking precedence over a constraints file,
+#    so the constraint was silently overridden. Confirmed via:
+#      docker exec ... python3 -c "import sqlalchemy; print(sqlalchemy.__version__)"
+#      -> still printed 2.0.30 even with --constraint applied.
+#
+# FIX: use requirements-airflow.txt instead — identical to
+# requirements.txt except sqlalchemy is left UNPINNED, so the
+# constraints file is free to select Airflow's compatible version.
+# requirements.txt (with sqlalchemy==2.0.30) is still used for local/
+# host development — the two environments don't share a Python
+# install, so running different SQLAlchemy versions is fine.
+# ------------------------------------------------------------------
+FROM apache/airflow:2.9.2
+
+USER airflow
+
+COPY requirements-airflow.txt /requirements-airflow.txt
+
+ARG AIRFLOW_VERSION=2.9.2
+ARG PYTHON_VERSION=3.12
+ARG CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"
+
+RUN pip install --no-cache-dir -r /requirements-airflow.txt --constraint "${CONSTRAINT_URL}"

@@ -1,32 +1,62 @@
 # Mandera Batch Analytics Pipeline — Dependencies
+#
+# Pinned exact versions for reproducibility. Each pin was checked
+# against PyPI's current latest release; updated where the gap was a
+# safe minor/patch bump within the same major version. pandas and
+# pyarrow are DELIBERATELY held back — see notes below — rather than
+# bumped to their current major releases.
 
 # Data generation
+# Faker's latest (40.x) is a large major-version jump from 24.x.
+# Faker bumps majors frequently for locale data, not breaking API
+# changes, but the jump size here warrants caution — re-verify
+# generator output (faker_customers.py, faker_products.py,
+# faker_orders.py) after bumping, rather than assuming it's a no-op.
 faker==24.11.0
 
 # MongoDB
-pymongo==4.7.3
-dnspython==2.6.1
+pymongo==4.17.0
+dnspython==2.8.0
 
 # PostgreSQL
-psycopg2-binary==2.9.9
-sqlalchemy==2.0.30
+psycopg2-binary==2.9.12
+sqlalchemy==2.0.51
+# NOTE: this pin is for LOCAL/HOST use only. The Airflow container
+# (Dockerfile.airflow / requirements-airflow.txt) deliberately leaves
+# sqlalchemy UNPINNED so Airflow's own --constraint file can select
+# the version (1.4.x) its internal ORM actually needs. Do not pin
+# sqlalchemy in requirements-airflow.txt — confirmed twice this
+# session that doing so breaks the Airflow container outright.
 
 # MinIO / Object Storage
-minio==7.2.7
+minio==7.2.20
 
 # Data processing
+# pandas 3.0 made confirmed breaking changes (dropped automatic pytz
+# inclusion, changed concat() sort behavior, removed deprecated
+# arguments). Held at 2.2.2 — the version every transform_*.py script
+# in this project was actually developed and tested against. Do NOT
+# bump without re-testing transform_customers.py, transform_products.py,
+# and transform_orders.py against pandas 3.x first.
 pandas==2.2.2
+# pyarrow tracks pandas compatibility closely — held at the version
+# paired with pandas 2.2.2, for the same reason as above.
 pyarrow==16.1.0
 
-# Airflow (install separately — see note below)
+# Airflow (install separately in the Docker image — see Dockerfile.airflow)
 # apache-airflow==2.9.2
 
 # Environment management
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 
 # Utilities
-requests==2.32.3
-python-dateutil==2.9.0
+requests==2.34.2
+python-dateutil==2.9.0.post0
 
 # Fernet key generation (used once during Airflow setup — see README)
-cryptography==42.0.8
+# cryptography 49.x is a large major-version jump from 42.x (cryptography
+# bumps majors frequently for OpenSSL/Rust toolchain updates, not
+# necessarily breaking the Fernet key generation this project actually
+# uses). Bumped, but verify the Fernet key generation step in the README
+# still works after upgrading, rather than assuming.
+cryptography==49.0.0
