@@ -15,7 +15,7 @@ Mandera Analytics needed a way to turn continuous operational transaction data i
 
 ## Architecture Overview
 
-![Mandera Architecture Diagram](docs/mandera_architecture_diagram.png)
+![Mandera Architecture Diagram](docs/mandera_analytics_pipeline.svg)
 
 ---
 
