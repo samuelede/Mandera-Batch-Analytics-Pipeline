@@ -84,7 +84,7 @@ re-testing the transform scripts first.
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/your-username/mandera-batch-analytics-pipeline.git
+git clone https://github.com/samuelede/mandera-batch-analytics-pipeline.git
 cd mandera-batch-analytics-pipeline
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
