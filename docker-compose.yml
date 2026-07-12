@@ -18,10 +18,41 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./sql:/sql:ro          # SQL files mounted read-only so psql can run them in-container
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pipeline}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pipeline} -d ${POSTGRES_DB:-mandera_warehouse}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - mandera-net
+
+  # ─────────────────────────────────────────────────────────────
+  # Schema init — runs once per `docker compose up`, exits after.
+  # Creates raw/staging/monitoring tables if they don't exist.
+  # Replaces the four manual `docker exec psql` setup steps.
+  # Safe to re-run — all CREATE TABLE statements use IF NOT EXISTS.
+  # NOTE: `mandera_warehouse` database is created automatically by
+  # the postgres service (via POSTGRES_DB env var) — this service
+  # only needs to create the table schemas inside it.
+  # ─────────────────────────────────────────────────────────────
+  postgres-init:
+    image: postgres:15
+    container_name: mandera-postgres-init
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-pipeline_secret}
+    volumes:
+      - ./sql:/sql:ro
+    command: >
+      bash -c "
+        echo 'Running schema setup...' &&
+        psql -h postgres -U ${POSTGRES_USER:-pipeline} -d ${POSTGRES_DB:-mandera_warehouse} -f /sql/create_raw_tables.sql &&
+        psql -h postgres -U ${POSTGRES_USER:-pipeline} -d ${POSTGRES_DB:-mandera_warehouse} -f /sql/create_staging_tables.sql &&
+        psql -h postgres -U ${POSTGRES_USER:-pipeline} -d ${POSTGRES_DB:-mandera_warehouse} -f /sql/monitoring_tables.sql &&
+        echo 'Schema setup complete.'
+      "
     networks:
       - mandera-net
 
@@ -104,6 +135,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:
@@ -130,7 +163,7 @@ services:
       - ./maintenance:/opt/airflow/maintenance
       - airflow_logs:/opt/airflow/logs
     ports:
-      - "8080:8080"
+      - "8083:8080"
     command: webserver
     networks:
       - mandera-net
@@ -151,6 +184,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:
@@ -190,6 +225,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:
