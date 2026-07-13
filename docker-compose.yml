@@ -144,9 +144,9 @@ services:
       # Explicit internal values — NOT inherited from .env's
       # POSTGRES_HOST/POSTGRES_PORT, which are set to localhost:5433
       # for host-side script testing and would be wrong here.
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-pipeline}:${POSTGRES_PASSWORD:-pipeline_secret}@postgres:5432/${POSTGRES_DB:-mandera_warehouse}
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
-      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER:-pipeline}:${POSTGRES_PASSWORD:-pipeline_secret}@postgres:5432/${POSTGRES_DB:-mandera_warehouse}
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       # Override .env's host-side values so config/settings.py (used
       # by every DAG task and the failure/SLA callbacks) also connects
       # via the internal service name/port, not localhost:5433.
