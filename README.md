@@ -150,8 +150,6 @@ Two independent workflows in `.github/workflows/`:
 
 ---
 
----
-
 ## Troubleshooting
 
 **Airflow containers at ~100% CPU, logs show `password authentication failed for user "pipeline"`**
