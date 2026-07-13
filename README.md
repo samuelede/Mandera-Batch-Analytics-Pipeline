@@ -144,8 +144,30 @@ Two independent workflows in `.github/workflows/`:
 
 ## Known Limitations
 
-- Bad-data injection rates (`config/data_quality.py`) are aggressive by design (~0.3–0.4 per field) - staging can legitimately retain well under half of a raw batch. This is intentional stress-testing of the validation layer, not a defect.
-- Forgetting to pass `--build` after changing `requirements-airflow.txt` or `Dockerfile.airflow` is a common source of `ModuleNotFoundError` inside Airflow - always rebuild explicitly.
+- Bad-data injection rates (`config/data_quality.py`) are aggressive by design (~0.3–0.4 per field) — staging can legitimately retain well under half of a raw batch. This is intentional stress-testing of the validation layer, not a defect.
+- Forgetting to pass `--build` after changing `requirements-airflow.txt` or `Dockerfile.airflow` is a common source of `ModuleNotFoundError` inside Airflow — always rebuild explicitly.
+- **Do not put `AIRFLOW__DATABASE__SQL_ALCHEMY_CONN` or `AIRFLOW__CELERY__RESULT_BACKEND` in `.env`.** `${VAR}` syntax does not interpolate in `.env` files — Airflow receives the literal string `${POSTGRES_USER}` as the username, fails authentication, and retries in a tight loop at ~100% CPU across all three Airflow containers. `docker-compose.yml` already sets both correctly using the internal `postgres:5432` service name. `run_pipeline.sh` has a preflight check that aborts if these are found in `.env`.
+
+---
+
+---
+
+## Troubleshooting
+
+**Airflow containers at ~100% CPU, logs show `password authentication failed for user "pipeline"`**
+`AIRFLOW__DATABASE__SQL_ALCHEMY_CONN` or `AIRFLOW__CELERY__RESULT_BACKEND` is in `.env` — remove both. See Known Limitations.
+
+**Logs show `You need to initialize the database`**
+Run `docker exec -it mandera-airflow-webserver airflow db init`, then re-run `bash run_pipeline.sh`.
+
+**`ModuleNotFoundError: No module named 'pymongo'` inside an Airflow task**
+The Airflow image was built without project dependencies. Run `bash run_pipeline.sh --build`.
+
+**On Windows/Git Bash: `exec: "C:/Program Files/Git/home/..."` errors**
+Git Bash rewrites absolute Unix paths into Windows paths. Prefix the command with `MSYS_NO_PATHCONV=1`, or use bare commands (`airflow ...`) rather than absolute paths (`/home/airflow/.local/bin/airflow ...`).
+
+**Airflow UI not on port 8080**
+If another project already binds 8080, Docker remaps it. `run_pipeline.sh` detects and prints the actual port on completion — or check `docker compose ps`.
 
 ---
 
